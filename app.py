@@ -7,6 +7,7 @@ A clean, sober Clinical Decision-Support (CDS) Prototype
 
 import os
 import glob
+import io
 import numpy as np
 import matplotlib.cm as cm
 from PIL import Image
@@ -29,7 +30,6 @@ st.set_page_config(
 # Custom minimal CSS for a clean, non-flashy, sober academic appearance
 st.markdown("""
 <style>
-    /* Clean font and layout */
     .main {
         background-color: #F8FAFC;
     }
@@ -91,6 +91,15 @@ st.markdown("""
         font-weight: 600;
         display: inline-block;
     }
+    .warning-box {
+        background-color: #FFFBEB;
+        border: 1px solid #FCD34D;
+        border-left: 5px solid #F59E0B;
+        border-radius: 6px;
+        padding: 14px;
+        margin-bottom: 18px;
+        color: #92400E;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,7 +108,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEFAULT_TEMP = 1.151  # As fitted in the notebook calibration
 
 # ==============================================================================
-# 2. ResNet50 Architecture in Pure PyTorch (Zero external dependencies)
+# 2. ResNet50 Architecture in Pure PyTorch (Matches notebook exactly)
 # ==============================================================================
 class Bottleneck(nn.Module):
     expansion = 4
@@ -169,35 +178,46 @@ class ResNet50(nn.Module):
 # ==============================================================================
 # 3. Model Loading & Weights Management
 # ==============================================================================
-@st.cache_resource
-def load_screening_model(weights_path=None):
+def load_screening_model(checkpoint_source=None):
     model = ResNet50(num_classes=3).to(DEVICE)
     model.eval()
+    loaded_name = None
+    is_trained = False
 
-    # Search for model checkpoint files in current directory or specified path
+    # 1. If user uploaded a checkpoint file through Streamlit UI
+    if checkpoint_source is not None and not isinstance(checkpoint_source, str):
+        try:
+            bytes_data = checkpoint_source.read()
+            checkpoint = torch.load(io.BytesIO(bytes_data), map_location=DEVICE)
+            state_dict = checkpoint.get("best_model_state_dict", checkpoint)
+            model.load_state_dict(state_dict, strict=False)
+            loaded_name = checkpoint_source.name
+            is_trained = True
+            return model, loaded_name, is_trained
+        except Exception as e:
+            st.sidebar.error(f"Failed to load uploaded checkpoint: {e}")
+
+    # 2. Search local directory for known saved checkpoint files
     candidate_paths = [
-        weights_path,
+        checkpoint_source if isinstance(checkpoint_source, str) else None,
         "chest_xray_resnet50_2100_e8_clean.pth",
         "chest_xray_densenet121_2100_e8_clean.pth",
         "best_chest_xray_model.pth"
     ]
-    loaded_file = None
 
     for path in candidate_paths:
         if path and os.path.exists(path):
             try:
                 checkpoint = torch.load(path, map_location=DEVICE)
-                if isinstance(checkpoint, dict) and "best_model_state_dict" in checkpoint:
-                    state_dict = checkpoint["best_model_state_dict"]
-                else:
-                    state_dict = checkpoint
+                state_dict = checkpoint.get("best_model_state_dict", checkpoint)
                 model.load_state_dict(state_dict, strict=False)
-                loaded_file = path
+                loaded_name = os.path.basename(path)
+                is_trained = True
                 break
             except Exception as e:
                 print(f"Error loading {path}: {e}")
 
-    return model, loaded_file
+    return model, loaded_name, is_trained
 
 # ==============================================================================
 # 4. Grad-CAM Implementation
@@ -234,29 +254,23 @@ class GradCAM:
         if cam.max() > 0:
             cam = cam / cam.max()
 
-        # Resize CAM to 224x224 using PIL
         cam_pil = Image.fromarray(np.uint8(255 * cam)).resize((224, 224), Image.BILINEAR)
         cam_resized = np.array(cam_pil, dtype=np.float32) / 255.0
 
-        # Calibrated probabilities via temperature scaling
         calibrated_probs = F.softmax(output / temperature, dim=1)[0].detach().cpu().numpy()
-
         return cam_resized, predicted_class, calibrated_probs
 
 def create_visual_overlay(pil_image, cam, alpha=0.45):
     img_resized = pil_image.convert("RGB").resize((224, 224))
     img_np = np.array(img_resized)
 
-    # Use Matplotlib's jet colormap (avoiding cv2 dependency)
-    heatmap_colored = cm.jet(cam)[:, :, :3]  # Float in [0, 1]
+    heatmap_colored = cm.jet(cam)[:, :, :3]
     heatmap_uint8 = np.uint8(255 * heatmap_colored)
 
-    # Superimpose heatmap onto radiograph
     overlay = np.uint8(alpha * heatmap_uint8 + (1 - alpha) * img_np)
     return img_resized, heatmap_uint8, overlay
 
 def preprocess_image(pil_image):
-    # Standard medical ImageNet normalization
     img = pil_image.convert("RGB").resize((224, 224))
     arr = np.array(img, dtype=np.float32) / 255.0
     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -266,27 +280,37 @@ def preprocess_image(pil_image):
     return tensor
 
 # ==============================================================================
-# 5. UI Layout: Sidebar
+# 5. UI Layout: Sidebar & Checkpoint Upload
 # ==============================================================================
-st.sidebar.markdown("### 🫁 System Configuration")
+st.sidebar.markdown("### 🫁 Model Configuration")
 
-# Model path selection
-model_files = glob.glob("*.pth")
-selected_model_file = None
-if model_files:
-    selected_model_file = st.sidebar.selectbox("Checkpoint File", model_files, index=0)
+# Direct file uploader for the .pth model checkpoint
+uploaded_checkpoint = st.sidebar.file_uploader(
+    "📥 Upload Trained Checkpoint (.pth)",
+    type=["pth", "pt"],
+    help="Download 'chest_xray_resnet50_2100_e8_clean.pth' from your Google Drive and upload it here!"
+)
+
+# Also check for any existing .pth files in the project folder
+local_pths = glob.glob("*.pth")
+selected_local_file = None
+if local_pths and uploaded_checkpoint is None:
+    selected_local_file = st.sidebar.selectbox("Local Checkpoint Found", local_pths, index=0)
+
+checkpoint_to_load = uploaded_checkpoint if uploaded_checkpoint is not None else selected_local_file
+model, loaded_path, is_trained = load_screening_model(checkpoint_to_load)
+
+if is_trained:
+    st.sidebar.success(f"✅ **Trained Weights Loaded**: `{loaded_path}`")
 else:
-    st.sidebar.info("No `.pth` file found in folder. Running with demonstration base weights.")
-
-model, loaded_path = load_screening_model(selected_model_file)
-
-if loaded_path:
-    st.sidebar.success(f"● Loaded: `{os.path.basename(loaded_path)}`")
-else:
-    st.sidebar.warning("Using initialized model weights.")
+    st.sidebar.error("❌ **NO TRAINED MODEL LOADED**")
+    st.sidebar.caption(
+        "Currently using un-trained random weights. All outputs will hover at ~33% (random guessing). "
+        "Upload `chest_xray_resnet50_2100_e8_clean.pth` above to get your real 98%+ accuracy."
+    )
 
 temperature = st.sidebar.slider("Calibration Temperature (T)", min_value=0.5, max_value=2.0, value=DEFAULT_TEMP, step=0.05,
-                                help="Temperature scaling factor to calibrate softmax probabilities to empirical accuracy.")
+                                help="Fitted temperature from validation set (T = 1.151).")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📁 Test with Sample Scans")
@@ -295,32 +319,36 @@ sample_choice = st.sidebar.selectbox(
     ["None (Upload your own)", "Sample 1: Normal", "Sample 2: Pneumonia", "Sample 3: Tuberculosis"]
 )
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-**Technical Specifications:**
-- **Backbone:** ResNet-50 (Residual Deep CNN)
-- **Target Conv Layer:** `layer4[-1]`
-- **Input Resolution:** 224 × 224 px
-- **Classes:** Normal, Pneumonia, TB
-""")
-
 # ==============================================================================
 # 6. UI Layout: Main Header
 # ==============================================================================
 st.markdown('<div class="header-title">🫁 Chest X-Ray Screening Assistant</div>', unsafe_allow_html=True)
 st.markdown('<div class="header-sub">Clinical Decision-Support & Lesion Localization Prototype (Normal / Pneumonia / Tuberculosis)</div>', unsafe_allow_html=True)
 
-# File uploader
+# Prominent alert banner if weights are missing
+if not is_trained:
+    st.markdown("""
+    <div class="warning-box">
+        <strong>⚠️ Model Weights Missing (Random Initialization Active)</strong><br>
+        Because no trained <code>.pth</code> file is in this folder, the neural network is initialized with <strong>random weights</strong>. 
+        This is why all probabilities are ~33.3% and always guessing Tuberculosis.<br><br>
+        <strong>How to fix in 10 seconds:</strong>
+        <ol style="margin-bottom: 0px; padding-left: 20px;">
+            <li>Go to your <strong>Google Drive</strong> and download <code>chest_xray_resnet50_2100_e8_clean.pth</code>.</li>
+            <li>In the sidebar on the left, click <strong>"Browse files"</strong> under <em>Upload Trained Checkpoint (.pth)</em> and select it.</li>
+        </ol>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Image uploader
 uploaded_file = st.file_uploader("Upload Frontal Chest Radiograph (PA or AP view)", type=["png", "jpg", "jpeg"])
 
-# Determine which image to process
 active_image = None
-
 if uploaded_file is not None:
     try:
         active_image = Image.open(uploaded_file)
     except Exception as e:
-        st.error(f"Could not load uploaded image: {e}")
+        st.error(f"Could not load image: {e}")
 elif sample_choice != "None (Upload your own)":
     mapping = {
         "Sample 1: Normal": "samples/sample_normal.png",
@@ -335,11 +363,10 @@ elif sample_choice != "None (Upload your own)":
 # 7. Analysis & Horizontal Visualization
 # ==============================================================================
 if active_image is not None:
-    # Target layer for ResNet50
     target_layer = model.layer4[-1]
     grad_cam = GradCAM(model, target_layer)
 
-    with st.spinner("Analyzing radiograph and extracting Grad-CAM activations..."):
+    with st.spinner("Analyzing radiograph and generating Grad-CAM heatmaps..."):
         input_tensor = preprocess_image(active_image)
         cam, pred_class, probs = grad_cam.generate(input_tensor, temperature=temperature)
         orig_img, heatmap_img, overlay_img = create_visual_overlay(active_image, cam)
@@ -347,12 +374,10 @@ if active_image is not None:
     predicted_label = CLASS_NAMES[pred_class]
     confidence_pct = probs[pred_class] * 100.0
 
-    # Calculate Predictive Uncertainty: Normalized Shannon Entropy
     entropy = -np.sum(probs * np.log2(np.clip(probs, 1e-9, 1.0)))
-    # Max entropy for 3 classes is log2(3) = 1.585 bits
     normalized_uncertainty = (entropy / 1.585) * 100.0
 
-    # ------------------ Horizontal Image Inspection ------------------
+    # Horizontal 3-Column Visualization
     st.markdown("#### 🔍 Visual Localization (Grad-CAM)")
     col1, col2, col3 = st.columns(3)
 
@@ -365,7 +390,7 @@ if active_image is not None:
 
     st.markdown("---")
 
-    # ------------------ Diagnostic Findings & Metrics ------------------
+    # Diagnostic Metrics
     st.markdown("#### 📋 Diagnostic Assessment & Uncertainty")
     m_col1, m_col2, m_col3 = st.columns(3)
 
@@ -398,7 +423,7 @@ if active_image is not None:
         st.markdown(f'<div class="metric-value">{entropy:.2f} <span style="font-size:14px; font-weight:normal; color:#64748B;">bits</span></div>{unc_badge}', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Probability Distribution Bars
+    # Probability Distribution
     st.markdown("##### Calibrated Likelihood Breakdown:")
     p_cols = st.columns(3)
     for i, name in enumerate(CLASS_NAMES):
@@ -407,7 +432,6 @@ if active_image is not None:
             st.write(f"**{name}**: `{val*100:.1f}%`")
             st.progress(val)
 
-    # Clinical Triage Recommendation Note
     if predicted_label in ["Pneumonia", "Tuberculosis"] and confidence_pct >= 60.0:
         st.warning("⚠️ **Triage Action**: High infectious probability detected. Recommended for prioritized radiologist consultation and microbiological confirmation (e.g., Sputum GeneXpert for TB).")
     elif normalized_uncertainty >= 50.0:
@@ -418,9 +442,6 @@ if active_image is not None:
 else:
     st.info("👆 Upload a chest radiograph above, or select a sample scan from the sidebar to inspect diagnostic predictions and Grad-CAM heatmaps.")
 
-# ==============================================================================
-# 8. Clinical Governance Footnote
-# ==============================================================================
 st.markdown("---")
 st.caption(
     "**Clinical Governance Notice:** This software is an academic decision-support prototype developed for radiologic triage demonstration. "
