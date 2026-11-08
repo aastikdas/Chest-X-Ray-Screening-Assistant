@@ -444,19 +444,6 @@ if active_image is not None:
             st.write(f"**{name}**: `{val*100:.1f}%`")
             st.progress(val)
 
-    if "Auditing Case" in sample_choice:
-        st.info(
-            "💡 **Auditing / Failure Mode Demonstration**: This is an **adult pneumonia** scan from Google Search. "
-            "The model predicts Tuberculosis (95%) because the Kaggle Pneumonia training set was exclusively pediatric (children aged 1–5), "
-            "while the TB dataset was adult. This serves as an empirical demonstration of **Shortcut Learning & Demographic Confounders**."
-        )
-
-    if predicted_label in ["Pneumonia", "Tuberculosis"] and confidence_pct >= 60.0:
-        st.warning("⚠️ **Triage Action**: High infectious probability detected. Recommended for prioritized radiologist consultation and microbiological confirmation (e.g., Sputum GeneXpert for TB).")
-    elif normalized_uncertainty >= 50.0:
-        st.info("ℹ️ **Triage Action**: Borderline / ambiguous presentation. Secondary reader inspection advised.")
-    else:
-        st.success("✅ **Triage Action**: Routine presentation with low suspicion of acute focal consolidation.")
 
 else:
     st.info("👆 Upload a chest radiograph above, or select a sample scan from the sidebar to inspect diagnostic predictions and Grad-CAM heatmaps.")
