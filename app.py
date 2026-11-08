@@ -284,20 +284,18 @@ def preprocess_image(pil_image):
 # ==============================================================================
 st.sidebar.markdown("### 🫁 Model Configuration")
 
-# Direct file uploader for the .pth model checkpoint
+# Direct file uploader for the .pth model checkpoint (optional)
 uploaded_checkpoint = st.sidebar.file_uploader(
     "📥 Upload Trained Checkpoint (.pth)",
     type=["pth", "pt"],
-    help="Download 'chest_xray_resnet50_2100_e8_clean.pth' from your Google Drive and upload it here!"
+    help="Upload 'chest_xray_resnet50_2100_e8_clean.pth' if not in root folder."
 )
 
-# Also check for any existing .pth files in the project folder
+# Auto-detect local .pth file without showing dropdown
 local_pths = glob.glob("*.pth")
-selected_local_file = None
-if local_pths and uploaded_checkpoint is None:
-    selected_local_file = st.sidebar.selectbox("Local Checkpoint Found", local_pths, index=0)
+default_local_file = local_pths[0] if local_pths else None
 
-checkpoint_to_load = uploaded_checkpoint if uploaded_checkpoint is not None else selected_local_file
+checkpoint_to_load = uploaded_checkpoint if uploaded_checkpoint is not None else default_local_file
 model, loaded_path, is_trained = load_screening_model(checkpoint_to_load)
 
 if is_trained:
@@ -305,18 +303,26 @@ if is_trained:
 else:
     st.sidebar.error("❌ **NO TRAINED MODEL LOADED**")
     st.sidebar.caption(
-        "Currently using un-trained random weights. All outputs will hover at ~33% (random guessing). "
+        "Currently using un-trained random weights. "
         "Upload `chest_xray_resnet50_2100_e8_clean.pth` above to get your real 98%+ accuracy."
     )
 
-temperature = st.sidebar.slider("Calibration Temperature (T)", min_value=0.5, max_value=2.0, value=DEFAULT_TEMP, step=0.05,
-                                help="Fitted temperature from validation set (T = 1.151).")
+# Fixed optimal calibration temperature (calibrated on validation set)
+temperature = DEFAULT_TEMP
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📁 Test with Sample Scans")
+st.sidebar.markdown("### 📁 Clinical Demonstration Samples")
 sample_choice = st.sidebar.selectbox(
-    "Load Built-in Sample Radiograph",
-    ["None (Upload your own)", "Sample 1: Normal", "Sample 2: Pneumonia", "Sample 3: Tuberculosis"]
+    "Select Sample Radiograph to Inspect",
+    [
+        "None (Upload your own)",
+        "1. Normal — Case 1 (Clear Lung Fields)",
+        "2. Pneumonia — Case 1 (Focal Consolidation)",
+        "3. Pneumonia — Case 2 (Bilateral Infiltrate)",
+        "4. Pneumonia — Case 3 (Right Mid-Lobe Opacity)",
+        "5. Tuberculosis — Case 1 (Apical Cavitary Lesion)",
+        "6. Adult Pneumonia — Auditing Case (Age Confounder)"
+    ]
 )
 
 # ==============================================================================
@@ -340,8 +346,11 @@ if not is_trained:
     </div>
     """, unsafe_allow_html=True)
 
-# Image uploader
-uploaded_file = st.file_uploader("Upload Frontal Chest Radiograph (PA or AP view)", type=["png", "jpg", "jpeg"])
+# Image uploader (supports PNG, JPG, JPEG, and WEBP formats)
+uploaded_file = st.file_uploader(
+    "Upload Frontal Chest Radiograph (PA or AP view)",
+    type=["png", "jpg", "jpeg", "webp"]
+)
 
 active_image = None
 if uploaded_file is not None:
@@ -351,9 +360,12 @@ if uploaded_file is not None:
         st.error(f"Could not load image: {e}")
 elif sample_choice != "None (Upload your own)":
     mapping = {
-        "Sample 1: Normal": "samples/sample_normal.png",
-        "Sample 2: Pneumonia": "samples/sample_pneumonia.png",
-        "Sample 3: Tuberculosis": "samples/sample_tuberculosis.png"
+        "1. Normal — Case 1 (Clear Lung Fields)": "samples/sample_normal_case1.png",
+        "2. Pneumonia — Case 1 (Focal Consolidation)": "samples/sample_pneumonia_case1.png",
+        "3. Pneumonia — Case 2 (Bilateral Infiltrate)": "samples/sample_pneumonia_case2.png",
+        "4. Pneumonia — Case 3 (Right Mid-Lobe Opacity)": "samples/sample_pneumonia_case3.png",
+        "5. Tuberculosis — Case 1 (Apical Cavitary Lesion)": "samples/sample_tuberculosis_case1.png",
+        "6. Adult Pneumonia — Auditing Case (Age Confounder)": "samples/sample_adult_pneumonia_failure_case.png"
     }
     sample_path = mapping.get(sample_choice)
     if sample_path and os.path.exists(sample_path):
@@ -431,6 +443,13 @@ if active_image is not None:
             val = float(probs[i])
             st.write(f"**{name}**: `{val*100:.1f}%`")
             st.progress(val)
+
+    if "Auditing Case" in sample_choice:
+        st.info(
+            "💡 **Auditing / Failure Mode Demonstration**: This is an **adult pneumonia** scan from Google Search. "
+            "The model predicts Tuberculosis (95%) because the Kaggle Pneumonia training set was exclusively pediatric (children aged 1–5), "
+            "while the TB dataset was adult. This serves as an empirical demonstration of **Shortcut Learning & Demographic Confounders**."
+        )
 
     if predicted_label in ["Pneumonia", "Tuberculosis"] and confidence_pct >= 60.0:
         st.warning("⚠️ **Triage Action**: High infectious probability detected. Recommended for prioritized radiologist consultation and microbiological confirmation (e.g., Sputum GeneXpert for TB).")
