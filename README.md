@@ -1,5 +1,3 @@
-# 🫁 Chest X-Ray Screening Assistant with Explainability
-## College Project Colab Notebook (Multi-Class: Normal, Pneumonia, Tuberculosis)
 
 ---
 
@@ -13,23 +11,12 @@ This notebook is designed for Google Colab to train and evaluate a Chest X-ray c
 4. **Model Calibration**: Measures and improves Expected Calibration Error (ECE) using Temperature Scaling.
 5. **ROC & Confusion Matrix**: Computes multi-class AUROC and generates clear test evaluation charts.
 6. **Horizontal Grad-CAM Visualization**: For sample test images, displays a clean 3-column horizontal comparison:
-   `[Original X-Ray]  -->  [Grad-CAM Attention Map]  -->  [Superimposed Overlay]`
-   with True Label, Predicted Label, Confidence %, and Uncertainty score.
 
 ---
 
 ## 🚀 How to Run in Google Colab
 
 1. Open [Google Drive](https://drive.google.com).
-2. Upload `Chest_XRay_Screening_Assistant_Explainability.ipynb`.
-3. Right-click the file $\rightarrow$ **Open with** $\rightarrow$ **Google Colaboratory**.
-4. In Colab, select **Runtime** $\rightarrow$ **Change runtime type** $\rightarrow$ **T4 GPU** $\rightarrow$ **Save**.
-5. Click **Runtime** $\rightarrow$ **Run all** (or run cell-by-cell).
-
----
-
-## 📑 Notebook Cell Breakdown
-
 | Cell | Purpose |
 | :--- | :--- |
 | **Cell 1** | Markdown Title & Summary |
@@ -38,6 +25,5 @@ This notebook is designed for Google Colab to train and evaluate a Chest X-ray c
 | **Cell 4** | Medical Transforms & Class Imbalance Handling |
 | **Cell 5** | DenseNet-121 Model Architecture Setup |
 | **Cell 6** | **Train or Load from Drive** (Skips retraining if model exists!) |
-| **Cell 7** | Model Calibration (Temperature Scaling & ECE) |
 | **Cell 8** | Confusion Matrix & Multi-Class ROC Curves |
 | **Cell 9** | **Horizontal Grad-CAM Visualization** (`Original` $\rightarrow$ `Heatmap` $\rightarrow$ `Overlay`) |
