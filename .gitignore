@@ -1,8 +1,11 @@
-# Model checkpoints (large binary files >50MB should not be tracked by Git)
+# Model checkpoints
 *.pth
 *.pt
 *.onnx
 *.bin
+
+# Whitelist production ResNet-50 weights (90.0MB < 100MB GitHub limit) for Cloud deployment
+!chest_xray_resnet50_2100_e8_clean.pth
 
 # Python bytecode & caches
 __pycache__/
