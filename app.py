@@ -310,19 +310,24 @@ else:
 # Fixed optimal calibration temperature (calibrated on validation set)
 temperature = DEFAULT_TEMP
 
+# Dynamically scan the samples/ folder for all image files
+SAMPLES_DIR = "samples"
+VALID_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+available_samples = []
+if os.path.exists(SAMPLES_DIR):
+    available_samples = [
+        f for f in sorted(os.listdir(SAMPLES_DIR))
+        if os.path.splitext(f)[1].lower() in VALID_IMAGE_EXTS
+    ]
+
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📁 Clinical Demonstration Samples")
+st.sidebar.markdown(f"### 📁 Sample Scans ({len(available_samples)} detected)")
+sample_options = ["None (Upload your own)"] + available_samples
+
 sample_choice = st.sidebar.selectbox(
     "Select Sample Radiograph to Inspect",
-    [
-        "None (Upload your own)",
-        "1. Normal — Case 1 (Clear Lung Fields)",
-        "2. Pneumonia — Case 1 (Focal Consolidation)",
-        "3. Pneumonia — Case 2 (Bilateral Infiltrate)",
-        "4. Pneumonia — Case 3 (Right Mid-Lobe Opacity)",
-        "5. Tuberculosis — Case 1 (Apical Cavitary Lesion)",
-        "6. Adult Pneumonia — Auditing Case (Age Confounder)"
-    ]
+    sample_options,
+    help="Any image file added to the 'samples/' folder will automatically show up here."
 )
 
 # ==============================================================================
@@ -359,17 +364,12 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Could not load image: {e}")
 elif sample_choice != "None (Upload your own)":
-    mapping = {
-        "1. Normal — Case 1 (Clear Lung Fields)": "samples/sample_normal_case1.png",
-        "2. Pneumonia — Case 1 (Focal Consolidation)": "samples/sample_pneumonia_case1.png",
-        "3. Pneumonia — Case 2 (Bilateral Infiltrate)": "samples/sample_pneumonia_case2.png",
-        "4. Pneumonia — Case 3 (Right Mid-Lobe Opacity)": "samples/sample_pneumonia_case3.png",
-        "5. Tuberculosis — Case 1 (Apical Cavitary Lesion)": "samples/sample_tuberculosis_case1.png",
-        "6. Adult Pneumonia — Auditing Case (Age Confounder)": "samples/sample_adult_pneumonia_failure_case.png"
-    }
-    sample_path = mapping.get(sample_choice)
-    if sample_path and os.path.exists(sample_path):
-        active_image = Image.open(sample_path)
+    sample_path = os.path.join(SAMPLES_DIR, sample_choice)
+    if os.path.exists(sample_path):
+        try:
+            active_image = Image.open(sample_path)
+        except Exception as e:
+            st.error(f"Could not load sample '{sample_choice}': {e}")
 
 # ==============================================================================
 # 7. Analysis & Horizontal Visualization
@@ -443,7 +443,6 @@ if active_image is not None:
             val = float(probs[i])
             st.write(f"**{name}**: `{val*100:.1f}%`")
             st.progress(val)
-
 
 else:
     st.info("👆 Upload a chest radiograph above, or select a sample scan from the sidebar to inspect diagnostic predictions and Grad-CAM heatmaps.")
